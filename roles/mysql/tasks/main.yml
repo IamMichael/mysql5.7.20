@@ -1,0 +1,145 @@
+---
+
+- name: "Create Mysql Folder"
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0750
+  with_items:
+    - /opt/mysqldata
+    - /opt/mysqlconfig
+    - "{{ install_tmp }}"
+  
+- name: "Copy Mysql Config File"
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: 999
+    group: 999 
+    mode: 0640
+  with_items:
+    - { src: 'mysqld-{{ mysql_role }}.cnf', dest: '/opt/mysqlconfig/mysqld.cnf' }
+
+- name: "Copy Mysql Service File"
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: 0640
+  with_items:
+    - { src: 'mysqld.service', dest: '/etc/systemd/system' }
+
+- name: "Copy Mysql Docker Image"
+  copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: 0640
+  with_items:
+    - { src: 'mysql_{{ mysql_ver }}.tar', dest: '{{ install_tmp }}' }
+    - { src: 'MySQL-python-1.2.5-1.el7.x86_64.rpm', dest: '{{ install_tmp }}' }
+
+- name: "Load Mysql Docker Image"
+  shell: "docker load -i {{ install_tmp }}/mysql_{{ mysql_ver }}.tar"
+
+- name: "Install Mysql Python Module"
+  yum:
+    name: "{{ install_tmp }}/MySQL-python-1.2.5-1.el7.x86_64.rpm"
+    state: present
+
+- name: "Init Mysql Server"
+  shell: >
+    docker run -d \
+      --name mysql \
+      -p 3306:3306 \
+      -e UMASK=0600 \
+      -e UMASK_DIR=0700 \
+      -e MYSQL_HISTFILE=/dev/null \
+      -e MYSQL_ROOT_PASSWORD={{ mysql_root_pwd }} \
+      -v /opt/mysqldata:/var/lib/mysql \
+      -v /opt/mysqlconfig/mysqld.cnf:/etc/mysql/mysql.conf.d/mysqld.cnf \
+      mysql:{{ mysql_ver }}
+
+- name: "Wait for Mysql Server"
+  wait_for:
+    host: 127.0.0.1
+    port: 3306
+    state: started
+    delay: 30
+   
+- name: "Stop Mysql Server Container"
+  shell: "docker stop mysql && docker rm mysql"
+
+- name: "Restart Mysql Server"
+  systemd:
+    name: "mysqld"
+    state: restarted
+    daemon_reload: yes
+    enabled: yes
+
+- name: "Wait for Mysql Server"
+  wait_for:
+    host: "{{ ansible_ssh_host }}"
+    port: 3306
+    state: started
+    delay: 30
+
+- name: "Create Mysql Replication User"
+  shell: >
+    docker exec -it mysql mysql -u root -p{{ mysql_root_pwd }} -e "CREATE USER 'repl'@'127.0.0.1' IDENTIFIED BY '{{ mysql_repl_pwd }}';" && \
+    docker exec -it mysql mysql -u root -p{{ mysql_root_pwd }} -e "CREATE USER 'repl'@{{ hostvars['h-mysql02']['ansible_ssh_host'] }} IDENTIFIED BY '{{ mysql_repl_pwd }}';" && \
+    docker exec -it mysql mysql -u root -p{{ mysql_root_pwd }} -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'repl'@{{ hostvars['h-mysql02']['ansible_ssh_host'] }};"
+  when: "'g-mysql-master' in group_names"
+
+- name: "Reset Mysql Master Slave"
+  shell: >
+    docker exec -it mysql mysql -u root -p{{ mysql_root_pwd }} -e "reset master;" && \
+    docker exec -it mysql mysql -u root -p{{ mysql_root_pwd }} -e "reset slave;" 
+
+- name: "Start Mysql Slave"
+  block:
+
+#  - name: "Start Mysql Master Slave Mode"
+#    shell: >
+#      docker exec -it mysql \
+#      mysql -u root -p{{ mysql_root_pwd }} \ 
+#      -e "change master to master_host=\"{{ hostvars['h-mysql01']['ansible_ssh_host'] }}\",master_port=3306,master_user='repl',master_password=\"{{ mysql_repl_pwd }}\",master_auto_position=1;"
+
+
+  - name: "Start Mysql Master Slave Mode"
+    mysql_replication:
+      mode: changemaster
+      master_host: "{{ hostvars['h-mysql01']['ansible_ssh_host'] }}"
+      master_user: repl
+      master_password: "{{ mysql_repl_pwd }}"
+      master_port: 3306
+      master_auto_position: yes
+      login_host: "{{ hostvars['h-mysql02']['ansible_ssh_host'] }}"
+      login_user: "root"
+      login_password: "{{ mysql_root_pwd }}"
+      login_port: 3306
+
+  - name: "Start Mysql Slave Thread"
+    mysql_replication:
+      mode: startslave
+      login_host: "{{ hostvars['h-mysql02']['ansible_ssh_host'] }}"
+      login_user: "root"
+      login_password: "{{ mysql_root_pwd }}"
+      login_port: 3306
+
+  - name: "Check Mysql Slave Status"
+    mysql_replication:
+      mode: getslave
+      login_host: "{{ hostvars['h-mysql02']['ansible_ssh_host'] }}"
+      login_user: "root"
+      login_password: "{{ mysql_root_pwd }}"
+      login_port: 3306
+  when: "'g-mysql-slave' in group_names"
+
+
+- name: "Remove Install Tmp Folder"
+  file:
+    path: "{{ install_tmp }}"
+    state: absent

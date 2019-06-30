@@ -1,0 +1,5 @@
+docker_data_root: "/opt/docker"
+install_tmp: "/tmp/install"
+mysql_ver: "5.7.20"
+mysql_root_pwd: "MySQL@123"
+mysql_repl_pwd: "Repl@123"
