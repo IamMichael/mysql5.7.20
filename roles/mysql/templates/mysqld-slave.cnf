@@ -26,11 +26,6 @@ symbolic-links                  = 0
 max_connections                 = 1000
 
 server_id                       = 200
-log-bin                         = mysql-bin
-binlog_cache_size               = 1M
-binlog_format                   = mixed
-expire_logs_days                = 7
-log_bin_trust_function_creators = 1
 read_only                       = 1
 
 # GTID
