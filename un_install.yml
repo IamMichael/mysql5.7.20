@@ -32,9 +32,24 @@
       with_items:
         - "docker"
       ignore_errors: true
+
+#    - name: "Find Docker Binary"
+#      find: 
+#        path: /usr/bin
+#        patterns: docker*
+#      register: docker_binary
+#     
+#    - name: "Remove Docker Binary"
+#      file:
+#        path: "{{ item.path }}"
+#        state: absent
+#      with_items:
+#        - "{{ docker_binary.files }}"
+#      loop_control:
+#        label: "{{ item.path }}"
   
     - name: "Remve Docker File"
-      file: {{ item }}
+      file: "{{ item }}"
         state: absent
       with_items:
         - "/usr/bin/docker"
