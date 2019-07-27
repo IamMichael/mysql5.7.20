@@ -1,6 +1,6 @@
 [Unit]
 Description=MySQL Server
-After=network-online.target
+After=network-online.target docker.service
 Requires=docker.service
 
 [Service]
