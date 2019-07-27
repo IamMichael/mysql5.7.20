@@ -49,7 +49,8 @@
 #        label: "{{ item.path }}"
   
     - name: "Remve Docker File"
-      file: "{{ item }}"
+      file: 
+        file: "{{ item }}"
         state: absent
       with_items:
         - "/usr/bin/docker"
